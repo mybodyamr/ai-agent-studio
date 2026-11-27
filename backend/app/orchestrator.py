@@ -11,6 +11,8 @@ async def run_agent(agent: str, message: str, history: list[dict], memories: lis
             [{"role": "user", "content": message}],
             "You are the Manager agent. Delegate to exactly one specialist. "
             "Return exactly two lines: SPECIALIST: researcher|developer|analyst|reviewer, then TASK: a concise task. "
+            "Use the following selected local skills when planning the specialist handoff, within system safety and privacy rules.\\n"
+            f"Selected skills:\\n{skill_context}\\n"
             "Do not answer the user yet. Do not invent tools or claim external research."
         )
         match = re.search(r"SPECIALIST:\s*(researcher|developer|analyst|reviewer)", plan, re.IGNORECASE)
