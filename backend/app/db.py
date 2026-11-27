@@ -53,9 +53,18 @@ def init_db():
           id INTEGER PRIMARY KEY AUTOINCREMENT, event TEXT NOT NULL, entity_id TEXT,
           detail TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS skills (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
+          instructions TEXT NOT NULL, triggers TEXT NOT NULL DEFAULT '[]',
+          enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+          builtin INTEGER NOT NULL DEFAULT 0 CHECK(builtin IN (0,1)),
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
         """)
         # Forward-compatible migration for databases created by earlier builds.
         task_columns = {r["name"] for r in db.execute("PRAGMA table_info(tasks)")}
         for name, declaration in (("result", "TEXT"), ("error", "TEXT"), ("agent", "TEXT NOT NULL DEFAULT 'manager'")):
             if name not in task_columns:
                 db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {declaration}")
+        from .skills import seed_default_skills
+        seed_default_skills(db)
