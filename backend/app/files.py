@@ -27,7 +27,7 @@ def validate_file_content(name: str, data: bytes):
         if not data.startswith(b"%PDF-"):
             raise ValueError("The file content does not match a PDF.")
     elif suffix in {".xlsx", ".xlsm"}:
-        if not data.startswith(b"PK\\x03\\x04"):
+        if not data.startswith(b"PK\x03\x04"):
             raise ValueError("The file content does not match an Excel workbook.")
         try:
             with ZipFile(BytesIO(data)) as archive:
@@ -42,7 +42,7 @@ def validate_file_content(name: str, data: bytes):
                     raise ValueError("The uploaded ZIP is not a valid Excel workbook.")
         except BadZipFile:
             raise ValueError("The Excel workbook archive is invalid.")
-    elif b"\\x00" in data:
+    elif b"\x00" in data:
         raise ValueError("Binary content is not allowed for text file types.")
 
 def extract_text(path: Path):
