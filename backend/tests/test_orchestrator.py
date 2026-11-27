@@ -5,7 +5,7 @@ from app.orchestrator import run_agent
 class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
     async def test_manager_delegates_then_reviews(self):
         with patch("app.orchestrator.generate", new_callable=AsyncMock) as generate:
-            generate.side_effect = ["SPECIALIST: developer\\nTASK: inspect the code", "draft answer", "reviewed answer"]
+            generate.side_effect = ["SPECIALIST: developer\nTASK: inspect the code", "draft answer", "reviewed answer"]
             result = await run_agent("manager", "review code", [], ["local note"])
             self.assertEqual(result, "reviewed answer")
             self.assertEqual(generate.await_count, 3)
