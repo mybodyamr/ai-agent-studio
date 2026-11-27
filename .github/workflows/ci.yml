@@ -4,6 +4,7 @@ on:
     branches: [main, phase-1-foundation]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 permissions:
   contents: read
