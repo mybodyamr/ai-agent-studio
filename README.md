@@ -9,8 +9,8 @@ A Windows-first, local-first multi-agent workspace. The language model, conversa
 - Five roles: Manager, Researcher, Developer, Analyst, and Reviewer. Manager delegates to a specialist and Reviewer checks the draft.
 - SQLite storage for conversations, messages, memories, tasks, documents, and an activity audit log.
 - FTS5 search indexes for saved memory and extracted local file text.
-- Local file upload, listing, search, read, and delete for TXT, Markdown, CSV, JSON, source files, PDF, XLSX, and XLSM (10 MB upload limit).
-- Background tasks run through the local Ollama model and store their result or error. Queued tasks can be cancelled.
+- Local file upload, listing, search, read, and delete for TXT, Markdown, CSV, JSON, source files, PDF, XLSX, and XLSM (10 MB upload limit), with file-signature checks and bounded PDF/Excel archive processing.
+- SQLite-backed background task queue runs one local Ollama task at a time, persists results/errors, supports cancellation while queued or running, and re-queues interrupted running tasks on next startup.
 - Explicit-query-only DuckDuckGo research. Only the search phrase is sent externally.
 - Windows launcher binds the API to 127.0.0.1, not the public network.
 
