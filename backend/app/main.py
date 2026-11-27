@@ -1,6 +1,7 @@
 import uuid
+import asyncio
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .db import connect, init_db
@@ -9,14 +10,33 @@ from .agents import AGENTS
 from .ollama import status as ollama_status
 from .orchestrator import run_agent
 from .research import search_public_web
-from .files import safe_path, extract_text, workspace
+from .files import safe_path, extract_text, workspace, validate_file_content
 
 app=FastAPI(title="AI Agent Studio API", version="0.2.0")
+worker_task: asyncio.Task | None = None
+current_execution: asyncio.Task | None = None
+current_task_id: str | None = None
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin,"http://127.0.0.1:3000"], allow_credentials=False, allow_methods=["GET","POST","DELETE"], allow_headers=["Content-Type"])
 
 @app.on_event("startup")
-def startup():
+async def startup():
+    global worker_task
     init_db()
+    with connect() as db:
+        db.execute("UPDATE tasks SET status='queued',updated_at=CURRENT_TIMESTAMP WHERE status='running'")
+        db.commit()
+    worker_task=asyncio.create_task(task_worker())
+
+@app.on_event("shutdown")
+async def shutdown():
+    global worker_task
+    if worker_task:
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
+        worker_task=None
 
 def audit(db, event, entity_id=None, detail=None):
     db.execute("INSERT INTO audit_events(event,entity_id,detail) VALUES(?,?,?)",(event,entity_id,detail))
@@ -108,23 +128,58 @@ async def research(req: ResearchRequest):
         raise HTTPException(502,"External research is temporarily unavailable.")
 
 async def execute_task(tid: str):
-    with connect() as db:
-        row=db.execute("SELECT * FROM tasks WHERE id=?",(tid,)).fetchone()
-        if not row or row["status"]=="cancelled": return
-        db.execute("UPDATE tasks SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=?",(tid,))
-        db.commit()
-        title,detail,agent=row["title"],row["detail"] or "",row["agent"]
     try:
-        result=await run_agent(agent,f"{title}\n\n{detail}",[],[])
         with connect() as db:
-            db.execute("UPDATE tasks SET status='done',result=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(result,tid))
-            audit(db,"task.completed",tid)
+            row=db.execute("SELECT * FROM tasks WHERE id=? AND status='running'",(tid,)).fetchone()
+            if not row:
+                return
+            title,detail,agent=row["title"],row["detail"] or "",row["agent"]
+            memories=db.execute("SELECT content FROM memories WHERE project='default' ORDER BY id DESC LIMIT 8").fetchall()
+        result=await run_agent(agent,f"{title}\n\n{detail}",[],[r["content"] for r in memories])
+        with connect() as db:
+            cur=db.execute("UPDATE tasks SET status='done',result=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'",(result,tid))
+            if cur.rowcount:
+                audit(db,"task.completed",tid)
             db.commit()
+    except asyncio.CancelledError:
+        with connect() as db:
+            cur=db.execute("UPDATE tasks SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'",(tid,))
+            if cur.rowcount:
+                audit(db,"task.cancelled",tid)
+            db.commit()
+        raise
     except Exception as exc:
         with connect() as db:
-            db.execute("UPDATE tasks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",(str(exc)[:1000],tid))
+            db.execute("UPDATE tasks SET status='failed',error=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'",(str(exc)[:1000],tid))
             audit(db,"task.failed",tid)
             db.commit()
+
+async def task_worker():
+    global current_execution, current_task_id
+    while True:
+        with connect() as db:
+            row=db.execute("SELECT id FROM tasks WHERE status='queued' ORDER BY created_at,id LIMIT 1").fetchone()
+            if row:
+                tid=row["id"]
+                claimed=db.execute("UPDATE tasks SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'",(tid,))
+                db.commit()
+                if not claimed.rowcount:
+                    tid=None
+            else:
+                tid=None
+        if not tid:
+            await asyncio.sleep(0.75)
+            continue
+        current_task_id=tid
+        current_execution=asyncio.create_task(execute_task(tid))
+        try:
+            await current_execution
+        except asyncio.CancelledError:
+            if asyncio.current_task() and asyncio.current_task().cancelling():
+                raise
+        finally:
+            current_execution=None
+            current_task_id=None
 
 @app.get("/api/tasks")
 def tasks():
@@ -132,23 +187,26 @@ def tasks():
         return [dict(r) for r in db.execute("SELECT * FROM tasks ORDER BY created_at DESC")]
 
 @app.post("/api/tasks")
-def add_task(req: TaskRequest, background: BackgroundTasks):
+def add_task(req: TaskRequest):
     tid=str(uuid.uuid4())
     agent=req.agent if req.agent in AGENTS else "manager"
     with connect() as db:
-        db.execute("INSERT INTO tasks(id,title,detail,agent) VALUES(?,?,?,?)",(tid,req.title,req.detail,agent))
+        queued=db.execute("SELECT COUNT(*) FROM tasks WHERE status IN ('queued','running')").fetchone()[0]
+        if queued>=100: raise HTTPException(429,"Task queue is full. Wait for current tasks to finish.")
+        db.execute("INSERT INTO tasks(id,title,detail,agent) VALUES(?,?,?,?)",(tid,req.title.strip(),req.detail,agent))
         audit(db,"task.created",tid,agent)
         db.commit()
-    background.add_task(execute_task,tid)
-    return {"id":tid,"title":req.title,"status":"queued"}
+    return {"id":tid,"title":req.title.strip(),"status":"queued"}
 
 @app.post("/api/tasks/{tid}/cancel")
-def cancel_task(tid: str):
+async def cancel_task(tid: str):
     with connect() as db:
-        cur=db.execute("UPDATE tasks SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'",(tid,))
-        if not cur.rowcount: raise HTTPException(409,"Task is already running, finished, or missing")
+        cur=db.execute("UPDATE tasks SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('queued','running')",(tid,))
+        if not cur.rowcount: raise HTTPException(409,"Task is already finished or missing")
         audit(db,"task.cancelled",tid)
         db.commit()
+    if current_task_id==tid and current_execution and not current_execution.done():
+        current_execution.cancel()
     return {"cancelled":True}
 
 @app.get("/api/files")
@@ -165,8 +223,9 @@ async def upload_file(file: UploadFile=File(...)):
         raise HTTPException(400,str(exc))
     data=await file.read(10_000_001)
     if len(data)>10_000_000: raise HTTPException(413,"File exceeds 10 MB limit")
-    path.write_bytes(data)
     try:
+        validate_file_content(original,data)
+        path.write_bytes(data)
         content=extract_text(path)
     except Exception as exc:
         path.unlink(missing_ok=True)
