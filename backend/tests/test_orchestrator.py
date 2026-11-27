@@ -10,7 +10,7 @@ class OrchestratorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result, "reviewed answer")
             self.assertEqual(generate.await_count, 3)
             specialist_call = generate.await_args_list[1]
-            self.assertIn("Developer", specialist_call.args[1])
+            self.assertIn("Help design and explain code", specialist_call.args[1])
             self.assertIn("local note", specialist_call.args[1])
 
     async def test_selected_specialist_runs_once(self):
