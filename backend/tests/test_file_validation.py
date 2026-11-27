@@ -1,11 +1,6 @@
-import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch
 from zipfile import ZipFile
 from io import BytesIO
-from app.config import settings
-from app.db import connect, init_db
 from app.files import safe_path, validate_file_content
 
 class FileValidationTests(unittest.TestCase):
@@ -17,9 +12,9 @@ class FileValidationTests(unittest.TestCase):
 
     def test_rejects_binary_text_and_fake_excel(self):
         with self.assertRaises(ValueError):
-            validate_file_content("a.txt", b"hello\\x00world")
+            validate_file_content("a.txt", b"hello\x00world")
         with self.assertRaises(ValueError):
-            validate_file_content("a.xlsx", b"PK\\x03\\x04not a zip")
+            validate_file_content("a.xlsx", b"PK\x03\x04not a zip")
 
     def test_accepts_minimal_valid_excel_zip_container(self):
         buf=BytesIO()
