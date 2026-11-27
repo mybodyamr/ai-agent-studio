@@ -14,6 +14,7 @@ jobs:
           python-version: "3.11"
       - run: pip install -r backend/requirements.txt
       - run: python -m compileall -q backend/app
+      - run: PYTHONPATH=backend python -m unittest discover -s backend/tests -v
   frontend:
     runs-on: ubuntu-latest
     defaults:
