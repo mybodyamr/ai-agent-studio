@@ -51,7 +51,7 @@ GitHub Actions checks Python compilation, backend unit tests, and a production f
 - Manager delegation is model-guided but does not yet provide autonomous tool execution.
 - Research is a separate explicit-query feature; the Researcher role does not silently browse the internet.
 - File retrieval adds searchable local excerpts only through the file-search API; the chat UI does not yet expose file selection or citation cards.
-- Task execution is an Ollama prompt run, not a durable distributed job queue. Closing the app stops in-flight background work.
+- Task execution is a single-process local queue, not a distributed worker system. A task interrupted by closing the app is re-queued on next startup; no progress checkpoint is retained.
 - There is no multi-user authentication. Keep the local API bound to loopback and do not expose it to a LAN or public internet.
 - Windows/Ollama end-to-end tests must be completed on the user's own device.
 
