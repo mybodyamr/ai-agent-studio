@@ -1,6 +1,7 @@
 import uuid
 import asyncio
 import re
+import json
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,7 +63,7 @@ def create_skill(req: SkillCreate):
     with connect() as db:
         db.execute(
             "INSERT INTO skills(id,name,description,instructions,triggers,enabled,builtin) VALUES(?,?,?,?,?,1,0)",
-            (skill_id, req.name, req.description, req.instructions, __import__("json").dumps(req.triggers, ensure_ascii=False))
+            (skill_id, req.name, req.description, req.instructions, json.dumps(req.triggers, ensure_ascii=False))
         )
         audit(db, "skill.created", skill_id, req.name)
         db.commit()
