@@ -157,16 +157,22 @@ async def execute_task(tid: str):
 async def task_worker():
     global current_execution, current_task_id
     while True:
-        with connect() as db:
-            row=db.execute("SELECT id FROM tasks WHERE status='queued' ORDER BY created_at,id LIMIT 1").fetchone()
-            if row:
-                tid=row["id"]
-                claimed=db.execute("UPDATE tasks SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'",(tid,))
-                db.commit()
-                if not claimed.rowcount:
+        try:
+            with connect() as db:
+                row=db.execute("SELECT id FROM tasks WHERE status='queued' ORDER BY created_at,id LIMIT 1").fetchone()
+                if row:
+                    tid=row["id"]
+                    claimed=db.execute("UPDATE tasks SET status='running',updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='queued'",(tid,))
+                    db.commit()
+                    if not claimed.rowcount:
+                        tid=None
+                else:
                     tid=None
-            else:
-                tid=None
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await asyncio.sleep(1)
+            continue
         if not tid:
             await asyncio.sleep(0.75)
             continue
@@ -177,6 +183,8 @@ async def task_worker():
         except asyncio.CancelledError:
             if asyncio.current_task() and asyncio.current_task().cancelling():
                 raise
+        except Exception:
+            await asyncio.sleep(1)
         finally:
             current_execution=None
             current_task_id=None
