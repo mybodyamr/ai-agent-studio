@@ -1,5 +1,6 @@
 import uuid
 import asyncio
+import re
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -75,10 +76,19 @@ async def chat(req: ChatRequest):
         history=db.execute("SELECT role,content FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 16",(cid,)).fetchall()
         history=list(reversed(history))
         memories=db.execute("SELECT content FROM memories WHERE project='default' ORDER BY id DESC LIMIT 8").fetchall()
+        terms=re.findall(r"[\w\u0600-\u06ff]{3,}",req.message.lower())[:8]
+        file_context=""
+        if terms:
+            fts_query=" OR ".join(f'"{term}"' for term in terms)
+            try:
+                excerpts=db.execute("SELECT original_name,snippet(documents_fts,2,'','',' … ',24) AS excerpt FROM documents_fts WHERE documents_fts MATCH ? LIMIT 3",(fts_query,)).fetchall()
+                file_context="\n\n".join("File: "+row["original_name"]+"\n"+row["excerpt"] for row in excerpts)
+            except Exception:
+                file_context=""
         db.execute("INSERT INTO messages(conversation_id,role,content,agent) VALUES(?,?,?,?)",(cid,"user",req.message,agent))
         db.commit()
     try:
-        answer=await run_agent(agent,req.message,[{"role":m["role"],"content":m["content"]} for m in history],[m["content"] for m in memories])
+        answer=await run_agent(agent,req.message,[{"role":m["role"],"content":m["content"]} for m in history],[m["content"] for m in memories],file_context)
     except Exception:
         raise HTTPException(503,"تعذر الاتصال بـ Ollama. تأكد من تشغيله وتثبيت النموذج المحلي المحدد.")
     with connect() as db:
