@@ -6,18 +6,19 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .db import connect, init_db
-from .schemas import ChatRequest, MemoryRequest, ResearchRequest, TaskRequest
+from .schemas import ChatRequest, MemoryRequest, ResearchRequest, TaskRequest, SkillCreate, SkillUpdate
 from .agents import AGENTS
 from .ollama import status as ollama_status
 from .orchestrator import run_agent
 from .research import search_public_web
 from .files import safe_path, extract_text, workspace, validate_file_content
+from .skills import list_skills, select_skills
 
 app=FastAPI(title="AI Agent Studio API", version="0.2.0")
 worker_task: asyncio.Task | None = None
 current_execution: asyncio.Task | None = None
 current_task_id: str | None = None
-app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin,"http://127.0.0.1:3000"], allow_credentials=False, allow_methods=["GET","POST","DELETE"], allow_headers=["Content-Type"])
+app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin,"http://127.0.0.1:3000"], allow_credentials=False, allow_methods=["GET","POST","PATCH","DELETE"], allow_headers=["Content-Type"])
 
 @app.on_event("startup")
 async def startup():
@@ -49,6 +50,46 @@ async def health():
 @app.get("/api/agents")
 def agents():
     return [{"id":k,**v} for k,v in AGENTS.items()]
+
+@app.get("/api/skills")
+def get_skills():
+    with connect() as db:
+        return list_skills(db)
+
+@app.post("/api/skills")
+def create_skill(req: SkillCreate):
+    skill_id = "custom-" + uuid.uuid4().hex[:12]
+    with connect() as db:
+        db.execute(
+            "INSERT INTO skills(id,name,description,instructions,triggers,enabled,builtin) VALUES(?,?,?,?,?,1,0)",
+            (skill_id, req.name, req.description, req.instructions, __import__("json").dumps(req.triggers, ensure_ascii=False))
+        )
+        audit(db, "skill.created", skill_id, req.name)
+        db.commit()
+        return next(skill for skill in list_skills(db) if skill["id"] == skill_id)
+
+@app.patch("/api/skills/{skill_id}")
+def update_skill(skill_id: str, req: SkillUpdate):
+    with connect() as db:
+        cur = db.execute("UPDATE skills SET enabled=? WHERE id=?", (int(req.enabled), skill_id))
+        if not cur.rowcount:
+            raise HTTPException(404, "Skill not found")
+        audit(db, "skill.enabled" if req.enabled else "skill.disabled", skill_id)
+        db.commit()
+        return next(skill for skill in list_skills(db) if skill["id"] == skill_id)
+
+@app.delete("/api/skills/{skill_id}")
+def delete_skill(skill_id: str):
+    with connect() as db:
+        row = db.execute("SELECT builtin,name FROM skills WHERE id=?", (skill_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Skill not found")
+        if row["builtin"]:
+            raise HTTPException(403, "Built-in skills cannot be deleted; you can disable them.")
+        db.execute("DELETE FROM skills WHERE id=?", (skill_id,))
+        audit(db, "skill.deleted", skill_id, row["name"])
+        db.commit()
+        return {"deleted": True}
 
 @app.get("/api/conversations")
 def conversations():
@@ -85,10 +126,12 @@ async def chat(req: ChatRequest):
                 file_context="\n\n".join("File: "+row["original_name"]+"\n"+row["excerpt"] for row in excerpts)
             except Exception:
                 file_context=""
+        available_skills = list_skills(db, enabled_only=True)
+        selected_skills = select_skills(req.message, available_skills)
         db.execute("INSERT INTO messages(conversation_id,role,content,agent) VALUES(?,?,?,?)",(cid,"user",req.message,agent))
         db.commit()
     try:
-        answer=await run_agent(agent,req.message,[{"role":m["role"],"content":m["content"]} for m in history],[m["content"] for m in memories],file_context)
+        answer=await run_agent(agent,req.message,[{"role":m["role"],"content":m["content"]} for m in history],[m["content"] for m in memories],file_context,selected_skills)
     except Exception:
         raise HTTPException(503,"تعذر الاتصال بـ Ollama. تأكد من تشغيله وتثبيت النموذج المحلي المحدد.")
     with connect() as db:
@@ -96,7 +139,7 @@ async def chat(req: ChatRequest):
         db.execute("UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?",(cid,))
         audit(db,"chat.completed",cid,agent)
         db.commit()
-    return {"conversation_id":cid,"answer":answer,"agent":agent}
+    return {"conversation_id":cid,"answer":answer,"agent":agent,"skills":[{"id":skill["id"],"name":skill["name"]} for skill in selected_skills]}
 
 @app.get("/api/memory")
 def list_memory(project: str="default"):
