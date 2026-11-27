@@ -7,6 +7,7 @@ A Windows-first, local-first multi-agent workspace. The language model, conversa
 - Local FastAPI API and Next.js RTL interface.
 - Ollama chat using a locally installed model.
 - Five roles: Manager, Researcher, Developer, Analyst, and Reviewer. Manager delegates to a specialist and Reviewer checks the draft.
+- Local Skills system: built-in Arabic/English skills for coding, research, writing, data analysis, documents, and learning; chat automatically selects up to two matching enabled skills. Users can create, enable/disable, and delete custom skills. Skill definitions and selection stay in local SQLite; skills do not grant shell or unrestricted network access.
 - SQLite storage for conversations, messages, memories, tasks, documents, and an activity audit log.
 - FTS5 search indexes for saved memory and extracted local file text.
 - Local file upload, listing, search, read, and delete for TXT, Markdown, CSV, JSON, source files, PDF, XLSX, and XLSM (10 MB upload limit), with file-signature checks and bounded PDF/Excel archive processing.
