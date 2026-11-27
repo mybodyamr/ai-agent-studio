@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 from app.config import settings
 from app.main import app
@@ -32,6 +32,18 @@ class ApiTests(unittest.TestCase):
                 with TestClient(app) as client:
                     response=client.post("/api/files",files={"file":("fake.pdf",b"not pdf","application/pdf")})
                     self.assertEqual(response.status_code,400)
+
+    def test_chat_uses_relevant_local_file_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(settings,"database_path",str(Path(tmp)/"db.sqlite3")), patch.object(settings,"workspace_path",str(Path(tmp)/"workspace")):
+                with TestClient(app) as client:
+                    uploaded=client.post("/api/files",files={"file":("invoice.txt",b"The invoice total is 125 dollars.","text/plain")})
+                    self.assertEqual(uploaded.status_code,200,uploaded.text)
+                    with patch("app.main.run_agent",new_callable=AsyncMock,return_value="summary") as agent:
+                        response=client.post("/api/chat",json={"message":"summarize invoice","agent":"analyst"})
+                        self.assertEqual(response.status_code,200,response.text)
+                        self.assertIn("invoice",agent.await_args.args[4].lower())
+                        self.assertIn("125",agent.await_args.args[4])
 
 if __name__ == "__main__":
     unittest.main()
