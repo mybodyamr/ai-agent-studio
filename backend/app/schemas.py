@@ -48,3 +48,31 @@ class TaskRequest(BaseModel):
         if not value:
             raise ValueError("Task title cannot be blank.")
         return value
+
+
+class SkillCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    description: str = Field(min_length=2, max_length=240)
+    instructions: str = Field(min_length=10, max_length=5000)
+    triggers: list[str] = Field(default_factory=list, max_length=30)
+
+    @field_validator("name", "description", "instructions")
+    @classmethod
+    def trim_skill_text(cls, value: str):
+        value = value.strip()
+        if not value:
+            raise ValueError("Skill fields cannot be blank.")
+        return value
+
+    @field_validator("triggers")
+    @classmethod
+    def normalize_triggers(cls, values: list[str]):
+        cleaned = []
+        for value in values:
+            item = value.strip().lower()
+            if item and item not in cleaned:
+                cleaned.append(item[:50])
+        return cleaned
+
+class SkillUpdate(BaseModel):
+    enabled: bool
