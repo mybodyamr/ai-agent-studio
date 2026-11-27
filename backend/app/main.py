@@ -189,7 +189,8 @@ async def execute_task(tid: str):
                 return
             title,detail,agent=row["title"],row["detail"] or "",row["agent"]
             memories=db.execute("SELECT content FROM memories WHERE project='default' ORDER BY id DESC LIMIT 8").fetchall()
-        result=await run_agent(agent,f"{title}\n\n{detail}",[],[r["content"] for r in memories])
+            selected_skills = select_skills(f"{title}\n{detail}", list_skills(db, enabled_only=True))
+        result=await run_agent(agent,f"{title}\n\n{detail}",[],[r["content"] for r in memories],skills=selected_skills)
         with connect() as db:
             cur=db.execute("UPDATE tasks SET status='done',result=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='running'",(result,tid))
             if cur.rowcount:
