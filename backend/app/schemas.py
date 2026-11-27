@@ -7,11 +7,12 @@ class ChatRequest(BaseModel):
 
 class MemoryRequest(BaseModel):
     content: str = Field(min_length=1, max_length=5000)
-    project: str = "default"
+    project: str = Field(default="default", min_length=1, max_length=100)
 
 class ResearchRequest(BaseModel):
     query: str = Field(min_length=2, max_length=500)
 
 class TaskRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
-    detail: str = ""
+    detail: str = Field(default="", max_length=10000)
+    agent: str = "manager"
